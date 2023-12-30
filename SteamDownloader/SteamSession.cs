@@ -356,17 +356,14 @@ public class SteamSession : IDisposable
             steamSession.callbackManager.Subscribe<SteamClient.ConnectedCallback>(v =>
             {
                 Logged = true;
-                Console.WriteLine("成功连接");
             });
             steamSession.callbackManager.Subscribe<SteamUser.LoggedOnCallback>(v =>
             {
                 steamSession.currentEResult = v.Result;
-                Console.WriteLine("用户登录");
             });
             steamSession.callbackManager.Subscribe<SteamUser.LoggedOffCallback>(v =>
             {
                 steamSession.currentEResult = v.Result;
-                Console.WriteLine("登录注销");
                 Logged = false;
             });
 
