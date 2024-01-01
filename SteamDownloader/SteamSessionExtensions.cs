@@ -14,7 +14,7 @@ public static class SteamSessionExtensions
         {
             try
             {
-                return await steamSession.DownloadChunkDecryptBytesAsync(depotId, chunkData, depotKey, cancellationToken);
+                return await steamSession.DownloadChunkDataAsync(depotId, chunkData, depotKey, cancellationToken);
             }
             catch (Exception e)
             {
@@ -79,7 +79,6 @@ public static class SteamSessionExtensions
         }
         else
         {
-            Console.WriteLine($"不能随机读写");
             foreach (var item in fileData.Chunks.OrderBy(v => v.Offset))
             {
                 var data = await steamSession.DownloadChunkDecryptBytesRetryAsync(depotId, item, depotKey, 5, cancellationToken);
@@ -88,7 +87,7 @@ public static class SteamSessionExtensions
         }
     }
 
-    public static async Task DownloadFileDataToDirectory(this SteamSession steamSession, string dir, uint depotId, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
+    public static async Task DownloadFileDataToDirectoryAsync(this SteamSession steamSession, string dir, uint depotId, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
     {
         var path = Path.Combine(dir, fileData.FileName);
         if (fileData.Flags.HasFlag(EDepotFileFlag.Directory))
@@ -151,7 +150,7 @@ public static class SteamSessionExtensions
         if(maxFiles is { })
             await ParallelForEachAsync(maxFiles, 1);
         if(lFiles is { })
-            await ParallelForEachAsync(lFiles, 5);
+            await ParallelForEachAsync(lFiles, 3);
         if(sFiles is { })
             await ParallelForEachAsync(sFiles, 10);
 
@@ -165,7 +164,7 @@ public static class SteamSessionExtensions
             await Parallel.ForEachAsync(fileDatas, opt, async (fileData, cancellationToken) =>
             {
                 var fullPath = Path.Combine(dir, fileData.FileName);
-                var d = Path.GetDirectoryName(fullPath);
+                var d = Path.GetDirectoryName(fullPath)!;
                 if (!Directory.Exists(d))
                     Directory.CreateDirectory(d);
 
@@ -176,14 +175,12 @@ public static class SteamSessionExtensions
                     var fileSHA1 = SHA1.HashData(fs);
                     if (fileData.FileHash.SequenceEqual(fileSHA1))
                     {
-                        await Console.Out.WriteLineAsync($"文件已存在: {fs.Name}");
                         return;
                     }
                     fs.Seek(0, SeekOrigin.Begin);
                 }
 
                 await steamSession.DownloadFileDataToStreamAsync(fs, depotId, fileData, cancellationToken);
-                await Console.Out.WriteLineAsync($"下载完成: {fs.Name}");
             });
         }
     }

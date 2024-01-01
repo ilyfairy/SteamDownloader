@@ -11,12 +11,11 @@ public partial class SteamSession
     public class SteamAuthentication
     {
         private readonly SteamSession steam;
-        private bool logged = false;
-        public bool Logged => steam.steamUser.SteamID is not null && logged;
+        /// <summary>
+        /// 是否已经登录过, 注:连接断开后, 此值不会被更改
+        /// </summary>
+        public bool Logged => steam.steamUser.SteamID is not null;
         public string? AccessToken { get; private set; }
-
-        private bool isAnonymous;
-        private string? username;
 
         public SteamAuthentication(SteamSession steamSession)
         {
@@ -28,13 +27,11 @@ public partial class SteamSession
             //});
             steamSession.CallbackManager.Subscribe<SteamUser.LoggedOnCallback>(v =>
             {
-                logged = true;
                 steamSession.connectionLoginResult = v.Result;
             });
             steamSession.CallbackManager.Subscribe<SteamUser.LoggedOffCallback>(v =>
             {
                 steamSession.connectionLoginResult = v.Result;
-                logged = false;
             });
 
         }
@@ -55,8 +52,6 @@ public partial class SteamSession
             {
                 await steam.loginLock.WaitAsync(cancellationToken);
 
-                isAnonymous = true;
-                username = null;
                 AccessToken = null;
                 steam.steamUser.LogOnAnonymous();
 
@@ -127,8 +122,6 @@ public partial class SteamSession
                     steam.CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan);
                     if (steam.connectionLoginResult is EResult.OK)
                     {
-                        isAnonymous = true;
-                        this.username = username;
                         break;
                     }    
                     if (steam.connectionLoginResult is EResult.NoConnection)
@@ -173,7 +166,6 @@ public partial class SteamSession
                     steam.CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan);
                     if (steam.connectionLoginResult is EResult.OK)
                     {
-                        this.username = username;
                         AccessToken = accessToken;
                         break;
                     }

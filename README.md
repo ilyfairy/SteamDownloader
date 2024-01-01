@@ -3,7 +3,7 @@
 [SteamKit](https://github.com/SteamRE/SteamKit/)的封装
 
 
-### 使用方法:
+## 使用:
 
 ```cs
 using SteamSession steam = new();
