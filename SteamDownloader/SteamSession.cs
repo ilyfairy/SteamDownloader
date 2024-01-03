@@ -1,4 +1,5 @@
-﻿using SteamKit2;
+﻿using SteamDownloader.WebApi;
+using SteamKit2;
 using SteamKit2.CDN;
 using SteamKit2.Internal;
 using System.Collections.Concurrent;
@@ -24,6 +25,8 @@ public partial class SteamSession : IDisposable
     private readonly ConcurrentDictionary<uint, ulong> AppTokensCache = new();
     private readonly ConcurrentDictionary<uint, SteamApps.PICSProductInfoCallback.PICSProductInfo> AppInfosCache = new();
     private readonly ConcurrentDictionary<uint, byte[]> DepotKeysCache = new();
+
+    public PublishedFileService PublishedFileService { get; }
 
     public SteamAuthentication Authentication { get; }
 
@@ -61,6 +64,8 @@ public partial class SteamSession : IDisposable
         {
             Disconnected?.Invoke(this, v);
         });
+
+        PublishedFileService = new(this);
     }
 
     public void Disconnect()
@@ -106,7 +111,7 @@ public partial class SteamSession : IDisposable
     public async Task CheckConnectionLogin()
     {
         EnsureRunAllCallback();
-        if(Authentication.Logged && !SteamClient.IsConnected)
+        if (Authentication.Logged && !SteamClient.IsConnected)
         {
             await ConnectAsync();
             return;
@@ -320,7 +325,7 @@ public partial class SteamSession : IDisposable
         var server = await GetRandomCdnServer(cancellationToken);
         Uri url = new(server.Url, $"/depot/{depotId}/chunk/{Convert.ToHexString(chunkData.ChunkID!)}");
 
-        var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead,cancellationToken);
+        var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -335,7 +340,7 @@ public partial class SteamSession : IDisposable
 
         if (offset != data.Length || stream.ReadByte() is int by and not -1)
             throw new InvalidDataException("Length mismatch after downloading depot chunk!");
-        
+
         var chunk = new DepotChunk(chunkData, data);
 
         Process(chunk);
@@ -415,7 +420,7 @@ public partial class SteamSession : IDisposable
     /// <param name="pubFileId">Id</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
-    public async Task<PublishedFileDetails> GetPublishedFileAsync(uint appId, ulong pubFileId)
+    public async Task<WebApi.WorkshopFileDetails> GetPublishedFileAsync(uint appId, ulong pubFileId)
     {
         await CheckConnectionLogin();
 
@@ -431,10 +436,10 @@ public partial class SteamSession : IDisposable
         }
 
         var response = result.GetDeserializedResponse<CPublishedFile_GetDetails_Response>();
-        return response.publishedfiledetails.First();
+        return response.publishedfiledetails.First().ToWorkshopFileDetails();
     }
 
-    public async Task<ICollection<PublishedFileDetails>> GetPublishedFileAsync(uint appId, params ulong[] pubFileIds)
+    public async Task<ICollection<WebApi.WorkshopFileDetails>> GetPublishedFileAsync(uint appId, params ulong[] pubFileIds)
     {
         await CheckConnectionLogin();
 
@@ -450,7 +455,7 @@ public partial class SteamSession : IDisposable
         }
 
         var response = result.GetDeserializedResponse<CPublishedFile_GetDetails_Response>();
-        return response.publishedfiledetails;
+        return response.publishedfiledetails.Select(v => v.ToWorkshopFileDetails()).ToArray();
     }
 
     private bool _disposed = false;
