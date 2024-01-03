@@ -88,7 +88,7 @@ public partial class SteamSession : IDisposable
         try
         {
             await loginLock.WaitAsync(cancellationToken);
-            SteamClient.Connect();
+            await SteamClient.Connect(null, cancellationToken);
 
             await Task.Run(() => CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan), cancellationToken);
 
