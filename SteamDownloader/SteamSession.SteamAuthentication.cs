@@ -11,11 +11,15 @@ public partial class SteamSession
     public class SteamAuthentication
     {
         private readonly SteamSession steam;
+
         /// <summary>
-        /// 是否已经登录过, 注:连接断开后, 此值不会被更改
+        /// 是否是登录状态
         /// </summary>
         public bool Logged => steam.steamUser.SteamID is not null;
         public string? AccessToken { get; private set; }
+
+        private bool isAnonymous;
+        private string? username;
 
         public SteamAuthentication(SteamSession steamSession)
         {
@@ -48,10 +52,14 @@ public partial class SteamSession
                 await steam.ConnectAsync(cancellationToken);
             }
 
+            if (steam.steamUser.SteamID is not null)
+                return;
+
             try
             {
                 await steam.loginLock.WaitAsync(cancellationToken);
 
+                steam.connectionLoginResult = EResult.Invalid;
                 AccessToken = null;
                 steam.steamUser.LogOnAnonymous();
 
@@ -59,6 +67,7 @@ public partial class SteamSession
 
                 if (steam.connectionLoginResult is EResult.OK)
                 {
+                    isAnonymous = true;
                 }
                 else if (steam.connectionLoginResult is EResult.NoConnection)
                 {
@@ -89,6 +98,9 @@ public partial class SteamSession
                 await steam.ConnectAsync(cancellationToken);
             }
 
+            if (steam.steamUser.SteamID is not null)
+                return;
+
             try
             {
                 await steam.loginLock.WaitAsync(cancellationToken);
@@ -109,6 +121,7 @@ public partial class SteamSession
                 var result = await authSession.PollingWaitForResultAsync(cancellationToken);
 
                 AccessToken = result.RefreshToken;
+                username = result.AccountName;
                 steam.steamUser.LogOn(new SteamUser.LogOnDetails()
                 {
                     Username = result.AccountName,
@@ -142,6 +155,9 @@ public partial class SteamSession
                 await steam.ConnectAsync(cancellationToken);
             }
 
+            if (steam.steamUser.SteamID is not null)
+                return;
+
             try
             {
                 await steam.loginLock.WaitAsync(cancellationToken);
@@ -167,6 +183,7 @@ public partial class SteamSession
                     if (steam.connectionLoginResult is EResult.OK)
                     {
                         AccessToken = accessToken;
+                        this.username = username;
                         break;
                     }
                     if (steam.connectionLoginResult is EResult.NoConnection)
@@ -181,23 +198,23 @@ public partial class SteamSession
             }
         }
 
-        //public async Task EnsureLoginAsync(CancellationToken cancellationToken = default)
-        //{
-        //    if (Logged)
-        //        return;
+        public async Task EnsureLoginAsync(CancellationToken cancellationToken = default)
+        {
+            if (Logged)
+                return;
 
-        //    if (isAnonymous)
-        //    {
-        //        await LoginAnonymousAsync(cancellationToken);
-        //    }
-        //    else
-        //    {
-        //        if (username is null || AccessToken is null)
-        //            throw new ConnectionException("请先登录");
+            if (isAnonymous)
+            {
+                await LoginAnonymousAsync(cancellationToken);
+            }
+            else
+            {
+                if (username is null || AccessToken is null)
+                    throw new ConnectionException("请先登录");
 
-        //        await LoginFromAccessTokenAsync(username, AccessToken, cancellationToken);
-        //    }
-        //}
+                await LoginFromAccessTokenAsync(username, AccessToken, cancellationToken);
+            }
+        }
     }
 
 }

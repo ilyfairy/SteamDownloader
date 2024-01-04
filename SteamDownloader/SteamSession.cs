@@ -22,9 +22,11 @@ public partial class SteamSession : IDisposable
     private readonly SteamCloud steamCloud;
     private readonly SteamUnifiedMessages.UnifiedService<IPublishedFile> publishedFile;
 
+    public bool IsCache { get; set; } = true;
     private readonly ConcurrentDictionary<uint, ulong> AppTokensCache = new();
     private readonly ConcurrentDictionary<uint, SteamApps.PICSProductInfoCallback.PICSProductInfo> AppInfosCache = new();
     private readonly ConcurrentDictionary<uint, byte[]> DepotKeysCache = new();
+    private readonly ConcurrentDictionary<uint, uint> DepotAppIdMap = new();
 
     public PublishedFileService PublishedFileService { get; }
 
@@ -85,6 +87,7 @@ public partial class SteamSession : IDisposable
         if (SteamClient.IsConnected)
             return;
 
+        bool isConnectionException = false;
         try
         {
             await loginLock.WaitAsync(cancellationToken);
@@ -97,6 +100,10 @@ public partial class SteamSession : IDisposable
                 throw new ConnectionException("连接失败");
             }
         }
+        catch (ConnectionException)
+        {
+            isConnectionException = true;
+        }
         catch (Exception)
         {
             throw;
@@ -105,16 +112,25 @@ public partial class SteamSession : IDisposable
         {
             loginLock.Release();
         }
-    }
 
+        if (isConnectionException)
+        {
+            await ConnectAsync(cancellationToken);
+        }
+    }
 
     public async Task CheckConnectionLogin()
     {
         EnsureRunAllCallback();
-        if (Authentication.Logged && !SteamClient.IsConnected)
+
+        if (SteamClient.IsConnected is false)
         {
             await ConnectAsync();
-            return;
+        }
+
+        if (Authentication.Logged is false)
+        {
+            await Authentication.EnsureLoginAsync();
         }
 
         if (SteamClient.IsConnected is false)
@@ -147,14 +163,14 @@ public partial class SteamSession : IDisposable
         return ContentServers[Random.Shared.Next(0, ContentServers.Count)];
     }
 
-    public async Task<ulong> GetAppAccessTokenAsync(uint appId)
+    public async Task<ulong> GetAppAccessTokenAsync(uint appId, CancellationToken cancellationToken = default)
     {
         await CheckConnectionLogin();
 
         ulong appToken;
         if (!AppTokensCache.TryGetValue(appId, out appToken))
         {
-            var appTokenResult = await steamApps.PICSGetAccessTokens(appId, null);
+            SteamApps.PICSTokensCallback appTokenResult = await steamApps.PICSGetAccessTokens(appId, null, cancellationToken);
 
             if (!appTokenResult.AppTokens.TryGetValue(appId, out appToken))
             {
@@ -165,16 +181,19 @@ public partial class SteamSession : IDisposable
                 throw new Exception("获取失败");
             }
 
-            foreach (var tokenKV in appTokenResult.AppTokens)
+            if (IsCache)
             {
-                AppTokensCache[tokenKV.Key] = tokenKV.Value;
+                foreach (var tokenKV in appTokenResult.AppTokens)
+                {
+                    AppTokensCache[tokenKV.Key] = tokenKV.Value;
+                }
             }
         }
 
         return appToken;
     }
 
-    public async Task<SteamApps.PICSProductInfoCallback.PICSProductInfo> GetAppInfoAsync(uint appId)
+    public async Task<SteamApps.PICSProductInfoCallback.PICSProductInfo> GetAppInfoAsync(uint appId, CancellationToken cancellationToken = default)
     {
         await CheckConnectionLogin();
 
@@ -188,7 +207,7 @@ public partial class SteamSession : IDisposable
 
         await CheckConnectionLogin();
         var productInfoRequest = new SteamApps.PICSRequest(appId, appToken);
-        var productInfoResult = await steamApps.PICSGetProductInfo(productInfoRequest, null);
+        var productInfoResult = await steamApps.PICSGetProductInfo(productInfoRequest, null, cancellationToken: cancellationToken);
 
         var firstProductInfoResult = productInfoResult.Results?.FirstOrDefault();
 
@@ -200,9 +219,12 @@ public partial class SteamSession : IDisposable
             throw new Exception($"ProductInfo获取失败, 找不到ProductInfo  AppId:{appId}");
         }
 
-        foreach (var item in firstProductInfoResult.Apps)
+        if (IsCache)
         {
-            AppInfosCache[item.Key] = item.Value;
+            foreach (var item in firstProductInfoResult.Apps)
+            {
+                AppInfosCache[item.Key] = item.Value;
+            }
         }
 
         return productInfo;
@@ -226,27 +248,25 @@ public partial class SteamSession : IDisposable
         return secion;
     }
 
-    public KeyValue? GetAppInfoSection(uint appId, EAppInfoSection section)
-    {
-        if (AppInfosCache.TryGetValue(appId, out var appInfo))
-        {
-            return GetAppInfoSection(appInfo, section);
-        }
-
-        return null;
-    }
-
     public DepotsContent GetAppInfoDepotsSection(SteamApps.PICSProductInfoCallback.PICSProductInfo appInfo)
     {
         var depots = GetAppInfoSection(appInfo, EAppInfoSection.Depots)!;
         return new DepotsContent(appInfo.ID, depots);
     }
 
-    public async Task<ulong> GetManifestRequestCodeAsync(uint appId, uint depotId, ulong manifestId, string branch = "public", string? branchPasswordHash = null)
+    public async Task<ulong> GetManifestRequestCodeAsync(uint appId, uint depotId, ulong manifestId, string branch = "public", string? branchPasswordHash = null, CancellationToken cancellationToken = default)
     {
         await CheckConnectionLogin();
 
-        var result = await steamContent.GetManifestRequestCode(depotId, appId, manifestId, branch, branchPasswordHash);
+        ulong result;
+        try
+        {
+            result = await steamContent.GetManifestRequestCode(depotId, appId, manifestId, branch, branchPasswordHash, cancellationToken);
+        }
+        catch (TaskCanceledException)
+        {
+            throw new TimeoutException();
+        }
 
         return result;
     }
@@ -268,10 +288,16 @@ public partial class SteamSession : IDisposable
         }
         if (result.Result is not EResult.OK)
         {
-            throw new Exception($"获取失败  DepotId:{depotId}");
+            throw new Exception($"获取失败  Result:{result.Result}  DepotId:{depotId}");
         }
 
-        DepotKeysCache[depotId] = result.DepotKey;
+        DepotAppIdMap[depotId] = appId;
+
+        if (IsCache)
+        {
+            DepotKeysCache[depotId] = result.DepotKey;
+        }
+
         return result.DepotKey;
     }
 
@@ -310,6 +336,16 @@ public partial class SteamSession : IDisposable
         var manifestInfo = await GetDepotManifestEncryptAsync(depotId, manifestId, code, cancellationToken);
         var key = await GetDepotKeyAsync(depotId, appId);
         manifestInfo.DecryptFilenames(key);
+        return manifestInfo;
+    }
+
+    public async Task<DepotManifest> GetDepotManifestAsync(uint appId, uint depotId, ulong manifestId, byte[] depotKey, string branch = "public", CancellationToken cancellationToken = default)
+    {
+        await CheckConnectionLogin();
+
+        var code = await GetManifestRequestCodeAsync(appId, depotId, manifestId, branch);
+        var manifestInfo = await GetDepotManifestEncryptAsync(depotId, manifestId, code, cancellationToken);
+        manifestInfo.DecryptFilenames(depotKey);
         return manifestInfo;
     }
 
@@ -420,7 +456,7 @@ public partial class SteamSession : IDisposable
     /// <param name="pubFileId">Id</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
-    public async Task<WebApi.WorkshopFileDetails> GetPublishedFileAsync(uint appId, ulong pubFileId)
+    public async Task<WorkshopFileDetails> GetPublishedFileAsync(uint appId, ulong pubFileId)
     {
         await CheckConnectionLogin();
 
@@ -439,7 +475,7 @@ public partial class SteamSession : IDisposable
         return response.publishedfiledetails.First().ToWorkshopFileDetails();
     }
 
-    public async Task<ICollection<WebApi.WorkshopFileDetails>> GetPublishedFileAsync(uint appId, params ulong[] pubFileIds)
+    public async Task<ICollection<WorkshopFileDetails>> GetPublishedFileAsync(uint appId, params ulong[] pubFileIds)
     {
         await CheckConnectionLogin();
 
