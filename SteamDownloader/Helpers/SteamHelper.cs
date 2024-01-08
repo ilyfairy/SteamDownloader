@@ -4,15 +4,13 @@ namespace SteamDownloader.Helpers;
 
 public static class SteamHelper
 {
-    public static async Task<SteamContentServer[]> TestContentServerConnectionAsync(HttpClient httpClient, IReadOnlyCollection<SteamContentServer> servers, TimeSpan timeout)
+    public static async Task<SteamContentServer[]> TestContentServerConnectionAsync(HttpClient httpClient, IEnumerable<SteamContentServer> servers, TimeSpan timeout)
     {
         List<SteamContentServer> success = new();
-        await Parallel.ForEachAsync(servers, async (s, _) =>
+        await Parallel.ForEachAsync(servers, new ParallelOptions() { MaxDegreeOfParallelism = 8 }, async (s, _) =>
         {
-            Stopwatch sw = new();
             CancellationTokenSource cts = new();
             cts.CancelAfter(timeout);
-            sw.Restart();
             Uri url = new UriBuilder("https", s.Host).Uri;
             try
             {
@@ -23,14 +21,16 @@ public static class SteamHelper
             {
                 return;
             }
-            if (sw.ElapsedMilliseconds > 4000)
+            if(cts.IsCancellationRequested)
+            {
                 return;
+            }
 
             lock (success)
             {
                 success.Add(s);
             }
-        });
+        }).ConfigureAwait(false);
         return success.ToArray();
     }
 }

@@ -49,7 +49,7 @@ public partial class SteamSession
         {
             if (steam.SteamClient.IsConnected is false)
             {
-                await steam.ConnectAsync(cancellationToken);
+                await steam.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
 
             if (steam.steamUser.SteamID is not null)
@@ -57,13 +57,13 @@ public partial class SteamSession
 
             try
             {
-                await steam.loginLock.WaitAsync(cancellationToken);
+                await steam.loginLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
                 steam.connectionLoginResult = EResult.Invalid;
                 AccessToken = null;
                 steam.steamUser.LogOnAnonymous();
 
-                await Task.Run(steam.CallbackManager.RunWaitCallbacks, cancellationToken);
+                await Task.Run(steam.CallbackManager.RunWaitCallbacks, cancellationToken).ConfigureAwait(false);
 
                 if (steam.connectionLoginResult is EResult.OK)
                 {

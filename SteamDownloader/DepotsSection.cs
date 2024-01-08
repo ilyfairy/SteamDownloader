@@ -2,13 +2,13 @@
 
 namespace SteamDownloader;
 
-public class DepotsContent
+public class DepotsSection
 {
     public uint AppId { get; set; }
     public Dictionary<string, Branch> Branches { get; set; } = [];
     public Dictionary<uint, DepotInfo> DepotsInfo { get; set; } = [];
 
-    public DepotsContent(uint appId, KeyValue depotsSection)
+    public DepotsSection(uint appId, KeyValue depotsSection)
     {
         AppId = appId;
         foreach (var item in depotsSection.Children)

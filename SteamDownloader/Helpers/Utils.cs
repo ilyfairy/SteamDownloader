@@ -14,7 +14,7 @@ internal static class Utils
 
             sb.Append(key);
             sb.Append('=');
-            sb.Append(value);
+            sb.Append(Uri.UnescapeDataString(value));
             sb.Append('&');
         }
         sb.Remove(sb.Length - 1, 1);
