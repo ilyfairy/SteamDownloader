@@ -1,9 +1,9 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace SteamDownloader.Helpers;
+namespace SteamDownloader.Helpers.JsonConverters;
 
-internal class DateTimeOffsetSecConverter : JsonConverter<DateTimeOffset>
+public class DateTimeOffsetSecondConverter : JsonConverter<DateTimeOffset>
 {
     public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {

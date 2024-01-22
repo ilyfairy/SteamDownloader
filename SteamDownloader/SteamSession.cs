@@ -1,9 +1,12 @@
 ﻿using SteamDownloader.WebApi;
+using SteamDownloader.WebApi.Interfaces;
 using SteamKit2;
 using SteamKit2.CDN;
 using SteamKit2.Internal;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -28,6 +31,7 @@ public partial class SteamSession : IDisposable
     private readonly ConcurrentDictionary<uint, byte[]> DepotKeysCache = new();
 
     public PublishedFileService PublishedFileService { get; }
+    public SteamRemoteStorage SteamRemoteStorage { get; }
 
     public SteamAuthentication Authentication { get; }
 
@@ -67,6 +71,7 @@ public partial class SteamSession : IDisposable
         });
 
         PublishedFileService = new(this);
+        SteamRemoteStorage = new(this);
     }
 
     public void Disconnect()
@@ -77,8 +82,7 @@ public partial class SteamSession : IDisposable
 
     public void EnsureRunAllCallback()
     {
-        if (SteamClient.GetCallback() is not null)
-            CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan);
+        CallbackManager.EnsureRunAllCallbacks();
     }
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
@@ -86,22 +90,25 @@ public partial class SteamSession : IDisposable
         if (SteamClient.IsConnected)
             return;
 
-        bool isConnectionException = false;
         try
         {
             await loginLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             await SteamClient.Connect(null, cancellationToken).ConfigureAwait(false);
 
-            await Task.Run(() => CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan), cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await Task.Run(() => CallbackManager.RunWaitAllCallbacks(TimeSpan.FromSeconds(60)), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                if (SteamClient.IsConnected)
+                    return;
+            }
 
             if (SteamClient.IsConnected is false)
             {
                 throw new ConnectionException("连接失败");
             }
-        }
-        catch (ConnectionException)
-        {
-            isConnectionException = true;
         }
         catch (Exception)
         {
@@ -111,25 +118,20 @@ public partial class SteamSession : IDisposable
         {
             loginLock.Release();
         }
-
-        if (isConnectionException)
-        {
-            await ConnectAsync(cancellationToken).ConfigureAwait(false);
-        }
     }
 
-    public async Task CheckConnectionLogin()
+    public async Task EnsureConnectionLogin(CancellationToken cancellationToken = default)
     {
         EnsureRunAllCallback();
 
         if (SteamClient.IsConnected is false)
         {
-            await ConnectAsync().ConfigureAwait(false);
+            await ConnectAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (Authentication.Logged is false)
         {
-            await Authentication.EnsureLoginAsync().ConfigureAwait(false);
+            await Authentication.EnsureLoginAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (SteamClient.IsConnected is false)
@@ -164,7 +166,7 @@ public partial class SteamSession : IDisposable
 
     public async Task<ulong> GetAppAccessTokenAsync(uint appId, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin();
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         ulong appToken;
         if (!AppTokensCache.TryGetValue(appId, out appToken))
@@ -194,9 +196,9 @@ public partial class SteamSession : IDisposable
 
     public async Task<SteamApps.PICSProductInfoCallback.PICSProductInfo> GetProductInfoAsync(uint appId, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin();
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
-        var appToken = await GetAppAccessTokenAsync(appId);
+        var appToken = await GetAppAccessTokenAsync(appId, cancellationToken).ConfigureAwait(false);
 
         // 获取ProductInfo
         if (AppInfosCache.TryGetValue(appId, out var productInfo))
@@ -204,7 +206,7 @@ public partial class SteamSession : IDisposable
             return productInfo;
         }
 
-        await CheckConnectionLogin();
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
         var productInfoRequest = new SteamApps.PICSRequest(appId, appToken);
         var productInfoResult = await steamApps.PICSGetProductInfo(productInfoRequest, null, cancellationToken: cancellationToken);
 
@@ -231,12 +233,12 @@ public partial class SteamSession : IDisposable
 
     public async Task<ulong> GetManifestRequestCodeAsync(uint appId, uint depotId, ulong manifestId, string branch = "public", string? branchPasswordHash = null, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin();
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         ulong result;
         try
         {
-            result = await steamContent.GetManifestRequestCode(depotId, appId, manifestId, branch, branchPasswordHash, cancellationToken);
+            result = await steamContent.GetManifestRequestCode(depotId, appId, manifestId, branch, branchPasswordHash, cancellationToken).ConfigureAwait(false);
         }
         catch (TaskCanceledException)
         {
@@ -246,16 +248,16 @@ public partial class SteamSession : IDisposable
         return result;
     }
 
-    public async Task<byte[]> GetDepotKeyAsync(uint appId, uint depotId)
+    public async Task<byte[]> GetDepotKeyAsync(uint appId, uint depotId, CancellationToken cancellationToken = default)
     {
         if (DepotKeysCache.TryGetValue(depotId, out var depotKey))
         {
             return depotKey;
         }
 
-        await CheckConnectionLogin();
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
-        var result = await steamApps.GetDepotDecryptionKey(depotId, appId);
+        var result = await steamApps.GetDepotDecryptionKey(depotId, appId, cancellationToken);
 
         if (result.Result is EResult.AccessDenied)
         {
@@ -276,25 +278,72 @@ public partial class SteamSession : IDisposable
 
     public async Task<DepotManifest> GetDepotManifestEncryptedAsync(uint depotId, ulong manifestId, ulong manifestRequestCode, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin().ConfigureAwait(false);
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var server = await GetRandomCdnServer(cancellationToken).ConfigureAwait(false);
         const uint MANIFEST_VERSION = 5;
 
         Uri url = new(server.Url, $"/depot/{depotId}/manifest/{manifestId}/{MANIFEST_VERSION}/{manifestRequestCode}");
-        var stream = await HttpClient.GetStreamAsync(url, cancellationToken).ConfigureAwait(false);
 
-        using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
-        var file = zip.Entries.First();
-        var bytes = new byte[file.Length];
-        file.Open().ReadExactly(bytes);
+        Stream stream;
+        nint unmanagedPtr = 0;
 
-        return DepotManifest.Deserialize(bytes);
+        try
+        {
+            using var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            if (response.Content.Headers.ContentLength is long len)
+            {
+                if (len >= 85000)
+                {
+                    unsafe
+                    {
+                        unmanagedPtr = (nint)NativeMemory.Alloc((nuint)len);
+                        stream = new UnmanagedMemoryStream((byte*)unmanagedPtr, len, len, FileAccess.ReadWrite);
+                    }
+                }
+                else
+                {
+                    stream = new MemoryStream((int)len);
+                }
+            }
+            else
+            {
+                stream = new MemoryStream();
+            }
+            await response.Content.CopyToAsync(stream, cancellationToken);
+
+            using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
+            var file = zip.Entries.First();
+            var bytes = new byte[file.Length];
+            await file.Open().ReadExactlyAsync(bytes, cancellationToken);
+
+            return DepotManifest.Deserialize(bytes);
+        }
+        catch(HttpRequestException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            throw;
+        }
+        finally
+        {
+            if(unmanagedPtr != 0)
+            {
+                unsafe
+                {
+                    NativeMemory.Free((void*)unmanagedPtr);
+                }
+            }
+        }
     }
 
     public async Task<DepotManifest> GetDepotManifestAsync(uint depotId, ulong manifestId, ulong manifestRequestCode, byte[] depotKey, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin().ConfigureAwait(false);
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var manifestInfo = await GetDepotManifestEncryptedAsync(depotId, manifestId, manifestRequestCode, cancellationToken).ConfigureAwait(false);
         manifestInfo.DecryptFilenames(depotKey);
@@ -303,18 +352,18 @@ public partial class SteamSession : IDisposable
 
     public async Task<DepotManifest> GetDepotManifestAsync(uint appId, uint depotId, ulong manifestId, string branch = "public", CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin().ConfigureAwait(false);
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var code = await GetManifestRequestCodeAsync(appId, depotId, manifestId, branch, null, cancellationToken).ConfigureAwait(false);
         var manifestInfo = await GetDepotManifestEncryptedAsync(depotId, manifestId, code, cancellationToken).ConfigureAwait(false);
-        var key = await GetDepotKeyAsync(appId, depotId).ConfigureAwait(false);
+        var key = await GetDepotKeyAsync(appId, depotId, cancellationToken).ConfigureAwait(false);
         manifestInfo.DecryptFilenames(key);
         return manifestInfo;
     }
 
     public async Task<DepotManifest> GetDepotManifestAsync(uint appId, uint depotId, ulong manifestId, byte[] depotKey, string branch = "public", CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin();
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var code = await GetManifestRequestCodeAsync(appId, depotId, manifestId, branch, cancellationToken: cancellationToken).ConfigureAwait(false);
         var manifestInfo = await GetDepotManifestEncryptedAsync(depotId, manifestId, code, cancellationToken).ConfigureAwait(false);
@@ -327,9 +376,14 @@ public partial class SteamSession : IDisposable
         return GetDepotManifestAsync(appId, appId, hcontentFileId, "public", cancellationToken);
     }
 
+    public Task<DepotManifest> GetWorkshopManifestAsync(uint appId, ulong hcontentFileId, byte[] depotKey, CancellationToken cancellationToken = default)
+    {
+        return GetDepotManifestAsync(appId, appId, hcontentFileId, depotKey, "public", cancellationToken);
+    }
+
     public async Task<byte[]> DownloadChunkDataAsync(uint depotId, DepotManifest.ChunkData chunkData, byte[] depotKey, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin().ConfigureAwait(false);
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var server = await GetRandomCdnServer(cancellationToken).ConfigureAwait(false);
         Uri url = new(server.Url, $"/depot/{depotId}/chunk/{Convert.ToHexString(chunkData.ChunkID!)}");
@@ -427,15 +481,15 @@ public partial class SteamSession : IDisposable
     /// <param name="pubFileId">Id</param>
     /// <returns></returns>
     /// <exception cref="Exception"></exception>
-    public async Task<WorkshopFileDetails> GetPublishedFileAsync(uint appId, ulong pubFileId)
+    public async Task<WorkshopFileDetails> GetPublishedFileAsync(uint appId, ulong pubFileId, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin().ConfigureAwait(false);
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var request = new CPublishedFile_GetDetails_Request();
         request.appid = appId;
         request.publishedfileids.Add(pubFileId);
 
-        var result = await publishedFile.SendMessage(v => v.GetDetails(request));
+        var result = await publishedFile.SendMessage(v => v.GetDetails(request), cancellationToken);
 
         if (result.Result != EResult.OK)
         {
@@ -446,15 +500,15 @@ public partial class SteamSession : IDisposable
         return response.publishedfiledetails.First().ToWorkshopFileDetails();
     }
 
-    public async Task<ICollection<WorkshopFileDetails>> GetPublishedFileAsync(uint appId, params ulong[] pubFileIds)
+    public async Task<ICollection<WorkshopFileDetails>> GetPublishedFileAsync(uint appId, ulong[] pubFileIds, CancellationToken cancellationToken = default)
     {
-        await CheckConnectionLogin().ConfigureAwait(false);
+        await EnsureConnectionLogin(cancellationToken).ConfigureAwait(false);
 
         var request = new CPublishedFile_GetDetails_Request();
         request.appid = appId;
         request.publishedfileids.AddRange(pubFileIds);
 
-        var result = await publishedFile.SendMessage(v => v.GetDetails(request));
+        var result = await publishedFile.SendMessage(v => v.GetDetails(request), cancellationToken);
 
         if (result.Result != EResult.OK)
         {

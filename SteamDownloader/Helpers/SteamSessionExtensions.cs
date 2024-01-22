@@ -1,5 +1,7 @@
 ﻿using SteamKit2;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace SteamDownloader.Helpers;
 
@@ -26,10 +28,25 @@ public static class SteamSessionExtensions
         throw exception;
     }
 
-    public static async Task DownloadFileDataToStreamAsync(this SteamSession steamSession, Stream stream,uint appId, uint depotId, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
+    public static async Task DownloadFileDataToStreamAsync(this SteamSession steamSession, Stream stream, uint appId, uint depotId, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
     {
-        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotId);
-        await DownloadFileDataToStreamAsync(steamSession, stream, depotId, depotKey, fileData, cancellationToken);
+        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotId, cancellationToken).ConfigureAwait(false);
+        await DownloadFileDataToStreamAsync(steamSession, stream, depotId, depotKey, fileData, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<byte[]> DownloadFileDataBytesAsync(this SteamSession steamSession, uint depotId, byte[] depotKey, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
+    {
+        MemoryStream ms = new((int)fileData.TotalSize);
+        await DownloadFileDataToStreamAsync(steamSession, ms, depotId, depotKey, fileData, cancellationToken);
+
+        if(ms.Length == ms.Capacity)
+        {
+            return ms.GetBuffer();
+        }
+        else
+        {
+            return ms.ToArray(); // fileData.TotalSize和实际大小不一致
+        }
     }
 
     public static async Task DownloadFileDataToStreamAsync(this SteamSession steamSession, Stream stream, uint depotId, byte[] depotKey, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
@@ -116,13 +133,13 @@ public static class SteamSessionExtensions
         await steamSession.DownloadFileDataToStreamAsync(fs, appId, depotId, fileData, cancellationToken).ConfigureAwait(false);
     }
 
-    public static async Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, uint appId, uint depotId, DepotManifest depotManifest, CancellationToken cancellationToken = default)
+    public static async Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, uint appId, DepotManifest depotManifest, CancellationToken cancellationToken = default)
     {
-        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotId);
-        await DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotId, depotKey, depotManifest, cancellationToken);
+        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotManifest.DepotID, cancellationToken);
+        await DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotKey, depotManifest, cancellationToken);
     }
 
-    public static async Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, uint depotId, byte[] depotKey, DepotManifest depotManifest, CancellationToken cancellationToken = default)
+    public static Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, byte[] depotKey, DepotManifest depotManifest, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
     {
         if (depotManifest.FilenamesEncrypted)
             throw new Exception("DepotManifest没有解密");
@@ -130,22 +147,61 @@ public static class SteamSessionExtensions
         if (depotManifest.Files is null)
             throw new Exception("DepotManifest.Files为null");
 
+        return DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotManifest.DepotID, depotKey, (depotManifest.Files ?? []).Where(v => Regex.IsMatch(v.FileName, pathSearchRegex)), cancellationToken);
+    }
+
+    public static Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, byte[] depotKey, DepotManifest depotManifest, CancellationToken cancellationToken = default)
+    {
+        if (depotManifest.FilenamesEncrypted)
+            throw new Exception("DepotManifest没有解密");
+
+        if (depotManifest.Files is null)
+            throw new Exception("DepotManifest.Files为null");
+
+        return DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotManifest.DepotID, depotKey, depotManifest.Files ?? [], cancellationToken);
+    }
+
+    public static async Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, uint depotId, byte[] depotKey, IEnumerable<DepotManifest.FileData> manifestFiles, CancellationToken cancellationToken = default)
+    {
         Directory.CreateDirectory(dir);
 
-        var flagsGroup = depotManifest.Files.GroupBy(v => v.Flags.HasFlag(EDepotFileFlag.Directory));
-        var dirs = flagsGroup.FirstOrDefault(v => v.Key is true);
-        var files = flagsGroup.FirstOrDefault(v => v.Key is false);
+        var files = new List<DepotManifest.FileData>();
 
-        if (dirs is { })
+        HashSet<string> dirs = new();
+        foreach (var item in manifestFiles)
         {
-            foreach (var item in dirs)
+            if(item.Flags.HasFlag(EDepotFileFlag.Directory))
             {
                 Directory.CreateDirectory(Path.Combine(dir, item.FileName));
             }
+            else
+            {
+                files.Add(item);
+            }
         }
 
-        if (files is null)
+        if (files.Count == 0)
             return;
+
+        if(files.Count == 1)
+        {
+            var file = files.First();
+            var fullPath = Path.Combine(dir, file.FileName);
+
+            await DownloadAsync(steamSession, fullPath, file, depotId, depotKey, cancellationToken);
+        }
+
+        if (files.Sum(v => (long)v.TotalSize) <= 10 * 1024 * 1024)
+        {
+            var tasks = files.Select(v =>
+            {
+                var file = files.First();
+                var fullPath = Path.Combine(dir, file.FileName);
+                return DownloadAsync(steamSession, fullPath, file, depotId, depotKey, cancellationToken);
+            });
+            await Task.WhenAll(tasks);
+
+        }
 
         var sizeGroup = files.OrderByDescending(v => v.TotalSize).GroupBy(v => v.TotalSize switch
         {
@@ -158,42 +214,58 @@ public static class SteamSessionExtensions
         var maxFiles = sizeGroup.FirstOrDefault(v => v.Key is "max");
 
         if (maxFiles is { })
-            await ParallelForEachAsync(maxFiles, 1).ConfigureAwait(false);
+            await ParallelForEachAsync(maxFiles, 1);
         if (lFiles is { })
-            await ParallelForEachAsync(lFiles, 3).ConfigureAwait(false);
+            await ParallelForEachAsync(lFiles, 3);
         if (sFiles is { })
-            await ParallelForEachAsync(sFiles, 10).ConfigureAwait(false);
+            await ParallelForEachAsync(sFiles, 10);
 
-        async ValueTask ParallelForEachAsync(IEnumerable<DepotManifest.FileData> fileDatas, int maxDegreeOfParallelism)
+        return;
+
+        Task ParallelForEachAsync(IEnumerable<DepotManifest.FileData> fileDatas, int maxDegreeOfParallelism)
         {
             var opt = new ParallelOptions()
             {
                 CancellationToken = cancellationToken,
                 MaxDegreeOfParallelism = maxDegreeOfParallelism,
             };
-            await Parallel.ForEachAsync(fileDatas, opt, async (fileData, cancellationToken) =>
+            return Parallel.ForEachAsync(fileDatas, opt, (fileData, cancellationToken) =>
             {
                 var fullPath = Path.Combine(dir, fileData.FileName);
+
+                return new ValueTask(DownloadAsync(steamSession, fullPath, fileData, depotId, depotKey, cancellationToken));
+            });
+        }
+
+        static Task DownloadAsync(SteamSession steamSession, string fullPath, DepotManifest.FileData fileData, uint depotId, byte[] depotKey, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Down();
+            }
+            catch (DirectoryNotFoundException)
+            {
                 var d = Path.GetDirectoryName(fullPath)!;
                 if (!Directory.Exists(d))
                     Directory.CreateDirectory(d);
 
-                using FileStream fs = new(fullPath, FileMode.OpenOrCreate);
+                return Down();
+            }
 
-                if ((long)fileData.TotalSize == fs.Length)
+            async Task Down()
+            {
+                using FileStream fs = new(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+
+                if(fs.Length == (long)fileData.TotalSize)
                 {
-                    var fileSHA1 = SHA1.HashData(fs);
-                    if (fileData.FileHash.SequenceEqual(fileSHA1))
-                    {
+                    if (fileData.FileHash.SequenceEqual(SHA1.HashData(fs)))
                         return;
-                    }
-                    fs.Seek(0, SeekOrigin.Begin);
                 }
 
-                await steamSession.DownloadFileDataToStreamAsync(fs, depotId, depotKey, fileData, cancellationToken).ConfigureAwait(false);
-            }).ConfigureAwait(false);
+                fs.SetLength((long)fileData.TotalSize);
+                await steamSession.DownloadFileDataToStreamAsync(fs, depotId, depotKey, fileData, cancellationToken);
+            }
+
         }
     }
-
-
 }

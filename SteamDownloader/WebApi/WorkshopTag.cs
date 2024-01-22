@@ -8,5 +8,5 @@ public class WorkshopTag
     public string Tag { get; set; }
 
     [JsonPropertyName("display_name")]
-    public string DisplayName { get; set; }
+    public string? DisplayName { get; set; }
 }

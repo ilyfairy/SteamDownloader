@@ -4,6 +4,9 @@ namespace SteamDownloader.WebApi;
 
 public class WorkshopFileDetails
 {
+    /// <summary>
+    /// 1 成功<br/>
+    /// </summary>
     [JsonPropertyName("result")]
     public uint Result { get; set; }
 
@@ -23,7 +26,7 @@ public class WorkshopFileDetails
     public uint ConsumerShortcutid { get; set; }
 
     [JsonPropertyName("filename")]
-    public string FileName { get; set; }
+    public string? FileName { get; set; }
 
     [JsonPropertyName("file_size")]
     public ulong FileSize { get; set; }
@@ -32,16 +35,16 @@ public class WorkshopFileDetails
     public ulong PreviewFileSize { get; set; }
 
     [JsonPropertyName("file_url")]
-    public string FileUrl { get; set; }
+    public string? FileUrl { get; set; }
 
     [JsonPropertyName("preview_url")]
-    public string PreviewUrl { get; set; }
+    public string? PreviewUrl { get; set; }
 
     [JsonPropertyName("youtubevideoid")]
-    public string YoutubeVideoId { get; set; }
+    public string? YoutubeVideoId { get; set; }
 
     [JsonPropertyName("url")]
-    public string Url { get; set; }
+    public string? Url { get; set; }
 
     [JsonPropertyName("hcontent_file")]
     public ulong HContentFile { get; set; }
@@ -50,10 +53,10 @@ public class WorkshopFileDetails
     public ulong HContentPreview { get; set; }
 
     [JsonPropertyName("title")]
-    public string Title { get; set; }
+    public string? Title { get; set; }
 
     [JsonPropertyName("file_description")]
-    public string FileDescription { get; set; }
+    public string? FileDescription { get; set; }
 
     [JsonPropertyName("time_created")]
     public DateTimeOffset TimeCreated { get; set; }
@@ -83,7 +86,7 @@ public class WorkshopFileDetails
     public bool Banned { get; set; }
 
     [JsonPropertyName("ban_reason")]
-    public string BanReason { get; set; }
+    public string? BanReason { get; set; }
 
     [JsonPropertyName("banner")]
     public ulong Banner { get; set; }
@@ -92,7 +95,7 @@ public class WorkshopFileDetails
     public bool CanBeDeleted { get; set; }
 
     [JsonPropertyName("app_name")]
-    public string AppName { get; set; }
+    public string? AppName { get; set; }
 
     [JsonPropertyName("file_type")]
     public uint FileType { get; set; }
@@ -153,6 +156,9 @@ public class WorkshopFileDetails
 
     [JsonPropertyName("ban_text_check_result")]
     public SteamKit2.Internal.EBanContentCheckResult BanTextCheckResult { get; set; }
+
+    [JsonPropertyName("short_description")]
+    public string? ShortDescription { get; set; }
 }
 
 
@@ -211,6 +217,7 @@ public static class WorkshopFileDetailsExtensions
         details.RevisionChangeNumber = publishedFileDetails.revision_change_number;
         details.Revision = publishedFileDetails.revision;
         details.BanTextCheckResult = publishedFileDetails.ban_text_check_result;
+        details.ShortDescription = publishedFileDetails.short_description;
 
         return details;
     }
