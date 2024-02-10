@@ -13,7 +13,7 @@ public class PublishedFileService(SteamSession steamSession) : InterfaceBase(ste
     /// 
     /// </summary>
     /// <param name="query_type">查询 UCG 物品的方式</param>
-    /// <param name="page">当前页, 当前上限为 1000</param>
+    /// <param name="page">当前页, 第一页是1, 当前上限为 1000</param>
     /// <param name="cursor">
     /// 将光标移至结果页(将第一个请求设置为'*'), 由于此参数允许您进行深度编页, 请优先考虑使用此参数, 而非页面参数<br/>
     /// 一经使用,页面参数将被忽略<br/>
@@ -66,7 +66,7 @@ public class PublishedFileService(SteamSession steamSession) : InterfaceBase(ste
                                                      uint? days = null,
                                                      bool? include_recent_votes_only = null,
                                                      uint? cache_max_age_seconds = null,
-                                                     string? language = null,
+                                                     PublishedFileServiceLanguage? language = null,
                                                      object? required_kv_tags = null,
                                                      bool? totalonly = null,
                                                      bool? ids_only = null,
@@ -102,7 +102,7 @@ public class PublishedFileService(SteamSession steamSession) : InterfaceBase(ste
                 new(nameof(days), days?.ToString()),
                 new(nameof(include_recent_votes_only), include_recent_votes_only?.ToString()),
                 new(nameof(cache_max_age_seconds), cache_max_age_seconds?.ToString()),
-                new(nameof(language), language),
+                new(nameof(language), ((int)(language ?? PublishedFileServiceLanguage.English)).ToString()),
                 new(nameof(required_kv_tags), required_kv_tags?.ToString()),
                 new(nameof(totalonly), totalonly?.ToString()),
                 new(nameof(ids_only), ids_only?.ToString()),
@@ -129,4 +129,11 @@ public class PublishedFileService(SteamSession steamSession) : InterfaceBase(ste
             throw;
         }
     }
+}
+
+
+public enum PublishedFileServiceLanguage
+{
+    English = 0,
+    Chinese = 6,
 }

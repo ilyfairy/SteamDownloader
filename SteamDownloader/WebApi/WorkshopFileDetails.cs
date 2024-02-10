@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using SteamDownloader.WebApi.Interfaces;
 
 namespace SteamDownloader.WebApi;
 
@@ -140,7 +141,7 @@ public class WorkshopFileDetails
     public WorkshopTag[]? Tags { get; set; }
 
     [JsonPropertyName("language")]
-    public int Language { get; set; }
+    public PublishedFileServiceLanguage Language { get; set; }
 
     [JsonPropertyName("maybe_inappropriate_sex")]
     public bool MaybeInappropriateSex { get; set; }
@@ -159,6 +160,62 @@ public class WorkshopFileDetails
 
     [JsonPropertyName("short_description")]
     public string? ShortDescription { get; set; }
+
+    [JsonPropertyName("previews")]
+    public WorkshopPreview[]? Previews { get; set; }
+
+    [JsonPropertyName("vote_data")]
+    public WorkshopVoteData? VoteData { get; set; }
+
+    public class WorkshopVoteData
+    {
+        [JsonPropertyName("score")]
+        public double Score { get; set; }
+
+        [JsonPropertyName("votes_up")]
+        public int VotesUp { get; set; }
+
+        [JsonPropertyName("votes_down")]
+        public int VotesDown { get; set; }
+    }
+
+    public class WorkshopPreview
+    {
+        [JsonPropertyName("previewid")]
+        public ulong PrewviewId { get; set; }
+
+        [JsonPropertyName("sortorder")]
+        public uint SortOrder { get; set; }
+
+        [JsonPropertyName("url")]
+        public Uri? Url { get; set; }
+
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
+
+        [JsonPropertyName("filename")]
+        public string? FileName { get; set; }
+        [JsonPropertyName("preview_type")]
+
+        public uint PreviewType { get; set; }
+
+        public WorkshopPreview() { }
+
+        public WorkshopPreview(SteamKit2.Internal.PublishedFileDetails.Preview preview)
+        {
+            PrewviewId = preview.previewid;
+            SortOrder = preview.sortorder;
+            Size = preview.size;
+            FileName = preview.filename;
+            PreviewType = preview.preview_type;
+            try
+            {
+                Url = new Uri(preview.url);
+            }
+            catch (Exception) { }
+        }
+
+    }
 }
 
 
@@ -166,7 +223,7 @@ public static class WorkshopFileDetailsExtensions
 {
     public static WorkshopFileDetails ToWorkshopFileDetails(this SteamKit2.Internal.PublishedFileDetails publishedFileDetails)
     {
-        WorkshopFileDetails details = new();
+        WorkshopFileDetails details = new(); 
         details.Result = publishedFileDetails.result;
         details.PublishedFileId = publishedFileDetails.publishedfileid;
         details.Creator = publishedFileDetails.creator;
@@ -211,7 +268,7 @@ public static class WorkshopFileDetailsExtensions
         details.NumChildren = publishedFileDetails.num_children;
         details.NumReports = publishedFileDetails.num_reports;
         details.Tags = publishedFileDetails.tags?.Select(v => new WorkshopTag() { Tag = v.tag, DisplayName = v.display_name }).ToArray();
-        details.Language = publishedFileDetails.language;
+        details.Language = (PublishedFileServiceLanguage)publishedFileDetails.language;
         details.MaybeInappropriateSex = publishedFileDetails.maybe_inappropriate_sex;
         details.MaybeInappropriateViolence = publishedFileDetails.maybe_inappropriate_violence;
         details.RevisionChangeNumber = publishedFileDetails.revision_change_number;
@@ -222,3 +279,4 @@ public static class WorkshopFileDetailsExtensions
         return details;
     }
 }
+

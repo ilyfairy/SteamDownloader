@@ -94,10 +94,11 @@ public partial class SteamSession : IDisposable
         {
             await loginLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             await SteamClient.Connect(null, cancellationToken).ConfigureAwait(false);
-
+            
             try
             {
-                await Task.Run(() => CallbackManager.RunWaitAllCallbacks(TimeSpan.FromSeconds(60)), cancellationToken).ConfigureAwait(false);
+                await SteamClient.WaitConnectionCallbackAsync().ConfigureAwait(false);
+                CallbackManager.EnsureRunAllCallbacks();
             }
             catch (Exception)
             {
@@ -107,6 +108,19 @@ public partial class SteamSession : IDisposable
 
             if (SteamClient.IsConnected is false)
             {
+                for (int i = 0; i < 2; i++)
+                {
+                    try
+                    {
+                        await ConnectWithoutLockAsync(cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                    catch (ConnectionException)
+                    {
+                        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+                }
                 throw new ConnectionException("连接失败");
             }
         }
@@ -117,6 +131,29 @@ public partial class SteamSession : IDisposable
         finally
         {
             loginLock.Release();
+        }
+    }
+
+    private async Task ConnectWithoutLockAsync(CancellationToken cancellationToken = default)
+    {
+        if (SteamClient.IsConnected)
+            return;
+
+        try
+        {
+            await SteamClient.Connect(null, cancellationToken).ConfigureAwait(false);
+            await SteamClient.WaitConnectionCallbackAsync().ConfigureAwait(false);
+            CallbackManager.EnsureRunAllCallbacks();
+        }
+        catch (Exception)
+        {
+            if (SteamClient.IsConnected)
+                return;
+        }
+
+        if (SteamClient.IsConnected is false)
+        {
+            throw new ConnectionException("连接失败");
         }
     }
 

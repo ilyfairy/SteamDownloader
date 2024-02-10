@@ -13,7 +13,6 @@ public class SteamRemoteStorage(SteamSession steamSession) : InterfaceBase(steam
     {
         List<KeyValuePair<string, string?>> list = new(publishedfileids.Length + 2);
 
-        list.Add(new("key", ApiKey));
         list.Add(new("itemcount", publishedfileids.Length.ToString()));
 
         for (int i = 0; i < publishedfileids.Length; i++)
