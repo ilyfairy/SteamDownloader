@@ -45,11 +45,11 @@ public partial class SteamSession
         /// </summary>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task LoginAnonymousAsync(CancellationToken cancellationToken = default)
+        public async Task LoginAnonymousAsync()
         {
             if (steam.SteamClient.IsConnected is false)
             {
-                await steam.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await steam.ConnectAsync();
             }
 
             if (steam.steamUser.SteamID is not null)
@@ -57,13 +57,13 @@ public partial class SteamSession
 
             try
             {
-                await steam.loginLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                steam.loginLock.Wait();
 
                 steam.connectionLoginResult = EResult.Invalid;
                 AccessToken = null;
                 steam.steamUser.LogOnAnonymous();
 
-                await Task.Run(steam.CallbackManager.RunWaitCallbacks, cancellationToken).ConfigureAwait(false);
+                steam.CallbackManager.RunWaitCallbacks();
 
                 if (steam.connectionLoginResult is EResult.OK)
                 {
@@ -95,7 +95,7 @@ public partial class SteamSession
         {
             if (!steam.SteamClient.IsConnected)
             {
-                await steam.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await steam.ConnectAsync();
             }
 
             if (steam.steamUser.SteamID is not null)
@@ -103,7 +103,7 @@ public partial class SteamSession
 
             try
             {
-                await steam.loginLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                steam.loginLock.Wait();
 
                 var authSession = await steam.SteamClient.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails()
                 {
@@ -148,11 +148,11 @@ public partial class SteamSession
             }
         }
 
-        public async Task LoginFromAccessTokenAsync(string username, string accessToken, CancellationToken cancellationToken = default)
+        public async Task LoginFromAccessTokenAsync(string username, string accessToken)
         {
             if (!steam.SteamClient.IsConnected)
             {
-                await steam.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await steam.ConnectAsync().ConfigureAwait(false);
             }
 
             if (steam.steamUser.SteamID is not null)
@@ -160,7 +160,7 @@ public partial class SteamSession
 
             try
             {
-                await steam.loginLock.WaitAsync(cancellationToken);
+                await steam.loginLock.WaitAsync();
 
                 using var loggedOnCallbackDisposable = steam.CallbackManager.Subscribe<SteamUser.LoggedOnCallback>(v =>
                 {
@@ -188,7 +188,7 @@ public partial class SteamSession
                     }
                     if (steam.connectionLoginResult is EResult.NoConnection)
                         throw new ConnectionException("登录失败");
-                    await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(50).ConfigureAwait(false);
                 }
 
             }
@@ -198,21 +198,21 @@ public partial class SteamSession
             }
         }
 
-        public async Task EnsureLoginAsync(CancellationToken cancellationToken = default)
+        public async Task EnsureLoginAsync()
         {
             if (Logged)
                 return;
 
             if (isAnonymous)
             {
-                await LoginAnonymousAsync(cancellationToken).ConfigureAwait(false);
+                await LoginAnonymousAsync().ConfigureAwait(false);
             }
             else
             {
                 if (username is null || AccessToken is null)
                     throw new ConnectionException("请先登录");
 
-                await LoginFromAccessTokenAsync(username, AccessToken, cancellationToken).ConfigureAwait(false);
+                await LoginFromAccessTokenAsync(username, AccessToken).ConfigureAwait(false);
             }
         }
     }

@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-
-namespace SteamDownloader.Helpers;
+﻿namespace SteamDownloader.Helpers;
 
 public static class SteamHelper
 {

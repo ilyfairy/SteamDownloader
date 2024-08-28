@@ -30,7 +30,7 @@ public static class SteamSessionExtensions
 
     public static async Task DownloadFileDataToStreamAsync(this SteamSession steamSession, Stream stream, uint appId, uint depotId, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
     {
-        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotId, cancellationToken).ConfigureAwait(false);
+        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotId).ConfigureAwait(false);
         await DownloadFileDataToStreamAsync(steamSession, stream, depotId, depotKey, fileData, cancellationToken).ConfigureAwait(false);
     }
 
@@ -135,7 +135,7 @@ public static class SteamSessionExtensions
 
     public static async Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, uint appId, DepotManifest depotManifest, CancellationToken cancellationToken = default)
     {
-        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotManifest.DepotID, cancellationToken);
+        var depotKey = await steamSession.GetDepotKeyAsync(appId, depotManifest.DepotID);
         await DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotKey, depotManifest, cancellationToken);
     }
 
