@@ -63,6 +63,7 @@ public partial class SteamSession
                 AccessToken = null;
                 steam.steamUser.LogOnAnonymous();
 
+                //steam.EnsureRunAllCallbacks();
                 steam.CallbackManager.RunWaitCallbacks();
 
                 if (steam.connectionLoginResult is EResult.OK)

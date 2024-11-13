@@ -1,4 +1,5 @@
 ﻿using SteamKit2.CDN;
+using System.Net;
 using System.Text.Json.Serialization;
 
 /// <summary>
@@ -57,5 +58,10 @@ public record SteamContentServer
             Vhost = host,
         };
         return contentServer;
+    }
+
+    public static implicit operator Server(SteamContentServer contentServer)
+    {
+        return (Server)new DnsEndPoint(contentServer.Host, 443);
     }
 }
