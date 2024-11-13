@@ -441,7 +441,7 @@ public partial class SteamSession : IDisposable
         return GetDepotManifestAsync(appId, appId, hcontentFileId, depotKey, "public", cancellationToken);
     }
 
-    public async Task<byte[]> DownloadChunkDataAsync(uint depotId, DepotManifest.ChunkData chunkData, byte[] depotKey, CancellationToken cancellationToken = default)
+    public async Task<byte[]> DownloadChunkDataAsync(uint depotId, DepotManifest.ChunkData chunkData, byte[] depotKey, byte[] dest, CancellationToken cancellationToken = default)
     {
         await EnsureConnectionLogin().ConfigureAwait(false);
 
@@ -464,10 +464,15 @@ public partial class SteamSession : IDisposable
         if (offset != data.Length || stream.ReadByte() is int by and not -1)
             throw new InvalidDataException("Length mismatch after downloading depot chunk!");
 
-        var chunk = new DepotChunk(chunkData, data);
-        chunk.Process(depotKey);
+        DepotChunk.Process(chunkData, data, dest, depotKey);
 
-        return chunk.Data;
+        return dest;
+    }
+
+    public Task<byte[]> DownloadChunkDataAsync(uint depotId, DepotManifest.ChunkData chunkData, byte[] depotKey, CancellationToken cancellationToken = default)
+    {
+        var dest = new byte[chunkData.UncompressedLength];
+        return DownloadChunkDataAsync(depotId, chunkData, depotKey, dest, cancellationToken);
     }
 
     /// <summary>
