@@ -167,7 +167,7 @@ public class WorkshopFileDetails
     [JsonPropertyName("vote_data")]
     public WorkshopVoteData? VoteData { get; set; }
 
-    public class WorkshopVoteData
+    public record WorkshopVoteData
     {
         [JsonPropertyName("score")]
         public double Score { get; set; }
@@ -179,7 +179,7 @@ public class WorkshopFileDetails
         public int VotesDown { get; set; }
     }
 
-    public class WorkshopPreview
+    public record WorkshopPreview
     {
         [JsonPropertyName("previewid")]
         public ulong PrewviewId { get; set; }
