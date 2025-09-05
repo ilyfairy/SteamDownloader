@@ -26,7 +26,7 @@ public partial class SteamSession : IDisposable
     private readonly SteamApps steamApps;
     private readonly SteamContent steamContent;
     private readonly SteamCloud steamCloud;
-    private readonly SteamUnifiedMessages.UnifiedService<IPublishedFile> publishedFile;
+    private readonly PublishedFile publishedFile;
 
     public bool IsCache { get; set; } = true;
     private readonly ConcurrentDictionary<uint, ulong> AppTokensCache = new();
@@ -45,12 +45,12 @@ public partial class SteamSession : IDisposable
 
     public List<SteamContentServer> ContentServers { get; set; } = new();
 
-    private readonly Func<BufferBlock<ICallbackMsg>> getSteamClientCallbackQueueFunc;
+    private readonly Func<BufferBlock<CallbackMsg>> getSteamClientCallbackQueueFunc;
 
     public SteamSession(SteamConfiguration? steamConfiguration = null)
     {
         var fieldInfo = typeof(SteamClient).GetField("callbackQueue", ~BindingFlags.Default)!;
-        getSteamClientCallbackQueueFunc = () => (BufferBlock<ICallbackMsg>)fieldInfo.GetValue(SteamClient)!;
+        getSteamClientCallbackQueueFunc = () => (BufferBlock<CallbackMsg>)fieldInfo.GetValue(SteamClient)!;
 
         HttpClient = new();
         if (steamConfiguration is null)
@@ -69,7 +69,7 @@ public partial class SteamSession : IDisposable
         steamCloud = SteamClient.GetHandler<SteamCloud>() ?? throw new Exception("SteamCloud获取失败");
 
         var steamUnifiedMessages = SteamClient.GetHandler<SteamUnifiedMessages>()!;
-        publishedFile = steamUnifiedMessages.CreateService<IPublishedFile>();
+        publishedFile = steamUnifiedMessages.CreateService<PublishedFile>();
 
         Authentication = new SteamAuthentication(this);
 
@@ -91,7 +91,7 @@ public partial class SteamSession : IDisposable
     public void EnsureRunAllCallbacks()
     {
 
-        BufferBlock<ICallbackMsg> callbackQueue = getSteamClientCallbackQueueFunc();
+        BufferBlock<CallbackMsg> callbackQueue = getSteamClientCallbackQueueFunc();
         if (callbackQueue.TryReceiveAll(out var callbackMsgs))
         {
             foreach (var call in callbackMsgs)
@@ -101,7 +101,7 @@ public partial class SteamSession : IDisposable
         }
 
         [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "Handle")]
-        static extern void Handle(CallbackManager callbackManager, ICallbackMsg call);
+        static extern void Handle(CallbackManager callbackManager, CallbackMsg call);
 
     }
 
@@ -490,14 +490,14 @@ public partial class SteamSession : IDisposable
         request.appid = appId;
         request.publishedfileids.Add(pubFileId);
 
-        var result = await publishedFile.SendMessage(v => v.GetDetails(request));
+        var result = await publishedFile.GetDetails(request);
 
         if (result.Result != EResult.OK)
         {
             throw new Exception($"响应失败: {result}");
         }
 
-        var response = result.GetDeserializedResponse<CPublishedFile_GetDetails_Response>();
+        var response = result.Body;
         return response.publishedfiledetails.First().ToWorkshopFileDetails();
     }
 
@@ -509,14 +509,14 @@ public partial class SteamSession : IDisposable
         request.appid = appId;
         request.publishedfileids.AddRange(pubFileIds);
 
-        var result = await publishedFile.SendMessage(v => v.GetDetails(request));
+        var result = await publishedFile.GetDetails(request);
 
         if (result.Result != EResult.OK)
         {
             throw new Exception($"响应失败: {result}");
         }
 
-        var response = result.GetDeserializedResponse<CPublishedFile_GetDetails_Response>();
+        var response = result.Body;
         return response.publishedfiledetails.Select(v => v.ToWorkshopFileDetails()).ToArray();
     }
 
