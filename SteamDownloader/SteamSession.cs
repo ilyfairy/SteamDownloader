@@ -22,16 +22,16 @@ public partial class SteamSession : IDisposable
     public SteamClient SteamClient { get; }
     public CallbackManager CallbackManager { get; }
 
-    private readonly SteamUser steamUser;
-    private readonly SteamApps steamApps;
-    private readonly SteamContent steamContent;
-    private readonly SteamCloud steamCloud;
-    private readonly PublishedFile publishedFile;
+    private readonly SteamUser _steamUser;
+    private readonly SteamApps _steamApps;
+    private readonly SteamContent _steamContent;
+    private readonly SteamCloud _steamCloud;
+    private readonly PublishedFile _publishedFile;
 
     public bool IsCache { get; set; } = true;
-    private readonly ConcurrentDictionary<uint, ulong> AppTokensCache = new();
-    private readonly ConcurrentDictionary<uint, SteamApps.PICSProductInfoCallback.PICSProductInfo> AppInfosCache = new();
-    private readonly ConcurrentDictionary<uint, byte[]> DepotKeysCache = new();
+    private readonly ConcurrentDictionary<uint, ulong> _appTokensCache = new();
+    private readonly ConcurrentDictionary<uint, SteamApps.PICSProductInfoCallback.PICSProductInfo> _appInfosCache = new();
+    private readonly ConcurrentDictionary<uint, byte[]> _depotKeysCache = new();
 
     public PublishedFileService PublishedFileService { get; }
     public SteamRemoteStorage SteamRemoteStorage { get; }
@@ -39,20 +39,23 @@ public partial class SteamSession : IDisposable
     public SteamAuthentication Authentication { get; }
 
     public event EventHandler<SteamClient.DisconnectedCallback>? Disconnected;
-    private EResult connectionLoginResult;
+    private EResult _connectionLoginResult;
 
-    private readonly SemaphoreSlim loginLock = new(1);
+    private readonly SemaphoreSlim _loginLock = new(1);
 
     public List<SteamContentServer> ContentServers { get; set; } = new();
 
-    private readonly Func<BufferBlock<CallbackMsg>> getSteamClientCallbackQueueFunc;
+    private readonly BufferBlock<CallbackMsg> _steamClientCallbackQueue;
+
+    private static readonly FieldInfo? _steamClientCallbackQueueFieldInfo;
+
+    static SteamSession()
+    {
+        _steamClientCallbackQueueFieldInfo = typeof(SteamClient).GetField("callbackQueue", ~BindingFlags.Default)!;
+    }
 
     public SteamSession(SteamConfiguration? steamConfiguration = null)
     {
-        var fieldInfo = typeof(SteamClient).GetField("callbackQueue", ~BindingFlags.Default)!;
-        getSteamClientCallbackQueueFunc = () => (BufferBlock<CallbackMsg>)fieldInfo.GetValue(SteamClient)!;
-
-        HttpClient = new();
         if (steamConfiguration is null)
         {
             SteamClient = new();
@@ -61,15 +64,18 @@ public partial class SteamSession : IDisposable
         {
             SteamClient = new(steamConfiguration);
         }
+        _steamClientCallbackQueue = (BufferBlock<CallbackMsg>)(_steamClientCallbackQueueFieldInfo?.GetValue(SteamClient) ?? throw new Exception("SteamClient.callbackQueue 获取失败"));
+
+        HttpClient = new();
         CallbackManager = new(SteamClient);
 
-        steamUser = SteamClient.GetHandler<SteamUser>() ?? throw new Exception("SteamUser获取失败");
-        steamApps = SteamClient.GetHandler<SteamApps>() ?? throw new Exception("SteamApps获取失败");
-        steamContent = SteamClient.GetHandler<SteamContent>() ?? throw new Exception("SteamContent获取失败");
-        steamCloud = SteamClient.GetHandler<SteamCloud>() ?? throw new Exception("SteamCloud获取失败");
+        _steamUser = SteamClient.GetHandler<SteamUser>() ?? throw new Exception("SteamUser获取失败");
+        _steamApps = SteamClient.GetHandler<SteamApps>() ?? throw new Exception("SteamApps获取失败");
+        _steamContent = SteamClient.GetHandler<SteamContent>() ?? throw new Exception("SteamContent获取失败");
+        _steamCloud = SteamClient.GetHandler<SteamCloud>() ?? throw new Exception("SteamCloud获取失败");
 
         var steamUnifiedMessages = SteamClient.GetHandler<SteamUnifiedMessages>()!;
-        publishedFile = steamUnifiedMessages.CreateService<PublishedFile>();
+        _publishedFile = steamUnifiedMessages.CreateService<PublishedFile>();
 
         Authentication = new SteamAuthentication(this);
 
@@ -90,9 +96,7 @@ public partial class SteamSession : IDisposable
 
     public void EnsureRunAllCallbacks()
     {
-
-        BufferBlock<CallbackMsg> callbackQueue = getSteamClientCallbackQueueFunc();
-        if (callbackQueue.TryReceiveAll(out var callbackMsgs))
+        if (_steamClientCallbackQueue.TryReceiveAll(out var callbackMsgs))
         {
             foreach (var call in callbackMsgs)
             {
@@ -112,7 +116,7 @@ public partial class SteamSession : IDisposable
 
         try
         {
-            loginLock.Wait();
+            _loginLock.Wait();
             SteamClient.Connect();
             
             try
@@ -151,7 +155,7 @@ public partial class SteamSession : IDisposable
         }
         finally
         {
-            loginLock.Release();
+            _loginLock.Release();
         }
     }
 
@@ -226,12 +230,12 @@ public partial class SteamSession : IDisposable
 
     public async Task<ulong> GetAppAccessTokenAsync(uint appId)
     {
-        EnsureConnectionLogin();
+        await EnsureConnectionLogin().ConfigureAwait(false);
 
         ulong appToken;
-        if (!AppTokensCache.TryGetValue(appId, out appToken))
+        if (!_appTokensCache.TryGetValue(appId, out appToken))
         {
-            SteamApps.PICSTokensCallback appTokenResult = await steamApps.PICSGetAccessTokens(appId, null);
+            SteamApps.PICSTokensCallback appTokenResult = await _steamApps.PICSGetAccessTokens(appId, null).ToTask().ConfigureAwait(false);
 
             if (!appTokenResult.AppTokens.TryGetValue(appId, out appToken))
             {
@@ -246,7 +250,7 @@ public partial class SteamSession : IDisposable
             {
                 foreach (var tokenKV in appTokenResult.AppTokens)
                 {
-                    AppTokensCache[tokenKV.Key] = tokenKV.Value;
+                    _appTokensCache[tokenKV.Key] = tokenKV.Value;
                 }
             }
         }
@@ -261,14 +265,14 @@ public partial class SteamSession : IDisposable
         var appToken = await GetAppAccessTokenAsync(appId).ConfigureAwait(false);
 
         // 获取ProductInfo
-        if (AppInfosCache.TryGetValue(appId, out var productInfo))
+        if (_appInfosCache.TryGetValue(appId, out var productInfo))
         {
             return productInfo;
         }
 
         await EnsureConnectionLogin().ConfigureAwait(false);
         var productInfoRequest = new SteamApps.PICSRequest(appId, appToken);
-        var productInfoResult = await steamApps.PICSGetProductInfo(productInfoRequest, null);
+        var productInfoResult = await _steamApps.PICSGetProductInfo(productInfoRequest, null).ToTask().ConfigureAwait(false);
 
         var firstProductInfoResult = productInfoResult.Results?.FirstOrDefault();
 
@@ -284,7 +288,7 @@ public partial class SteamSession : IDisposable
         {
             foreach (var item in firstProductInfoResult.Apps)
             {
-                AppInfosCache[item.Key] = item.Value;
+                _appInfosCache[item.Key] = item.Value;
             }
         }
 
@@ -298,7 +302,7 @@ public partial class SteamSession : IDisposable
         ulong result;
         try
         {
-            result = await steamContent.GetManifestRequestCode(depotId, appId, manifestId, branch, branchPasswordHash).ConfigureAwait(false);
+            result = await _steamContent.GetManifestRequestCode(depotId, appId, manifestId, branch, branchPasswordHash).ConfigureAwait(false);
         }
         catch (TaskCanceledException)
         {
@@ -310,14 +314,14 @@ public partial class SteamSession : IDisposable
 
     public async Task<byte[]> GetDepotKeyAsync(uint appId, uint depotId)
     {
-        if (DepotKeysCache.TryGetValue(depotId, out var depotKey))
+        if (_depotKeysCache.TryGetValue(depotId, out var depotKey))
         {
             return depotKey;
         }
 
         await EnsureConnectionLogin().ConfigureAwait(false);
 
-        var result = await steamApps.GetDepotDecryptionKey(depotId, appId);
+        var result = await _steamApps.GetDepotDecryptionKey(depotId, appId).ToTask().ConfigureAwait(false);
 
         if (result.Result is EResult.AccessDenied)
         {
@@ -330,7 +334,7 @@ public partial class SteamSession : IDisposable
 
         if (IsCache)
         {
-            DepotKeysCache[depotId] = result.DepotKey;
+            _depotKeysCache[depotId] = result.DepotKey;
         }
 
         return result.DepotKey;
@@ -372,12 +376,12 @@ public partial class SteamSession : IDisposable
             {
                 stream = new MemoryStream();
             }
-            await response.Content.CopyToAsync(stream, cancellationToken);
+            await response.Content.CopyToAsync(stream, cancellationToken).ConfigureAwait(false);
 
             using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
             var file = zip.Entries.First();
             var bytes = new byte[file.Length];
-            await file.Open().ReadExactlyAsync(bytes, cancellationToken);
+            await file.Open().ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
 
             return DepotManifest.Deserialize(bytes);
         }
@@ -490,7 +494,7 @@ public partial class SteamSession : IDisposable
         request.appid = appId;
         request.publishedfileids.Add(pubFileId);
 
-        var result = await publishedFile.GetDetails(request);
+        var result = await _publishedFile.GetDetails(request).ToTask().ConfigureAwait(false);
 
         if (result.Result != EResult.OK)
         {
@@ -509,7 +513,7 @@ public partial class SteamSession : IDisposable
         request.appid = appId;
         request.publishedfileids.AddRange(pubFileIds);
 
-        var result = await publishedFile.GetDetails(request);
+        var result = await _publishedFile.GetDetails(request).ToTask().ConfigureAwait(false);
 
         if (result.Result != EResult.OK)
         {

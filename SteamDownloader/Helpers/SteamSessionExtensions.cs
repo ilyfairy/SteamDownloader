@@ -37,7 +37,7 @@ public static class SteamSessionExtensions
     public static async Task<byte[]> DownloadFileDataBytesAsync(this SteamSession steamSession, uint depotId, byte[] depotKey, DepotManifest.FileData fileData, CancellationToken cancellationToken = default)
     {
         MemoryStream ms = new((int)fileData.TotalSize);
-        await DownloadFileDataToStreamAsync(steamSession, ms, depotId, depotKey, fileData, cancellationToken);
+        await DownloadFileDataToStreamAsync(steamSession, ms, depotId, depotKey, fileData, cancellationToken).ConfigureAwait(false);
 
         if(ms.Length == ms.Capacity)
         {
@@ -122,7 +122,7 @@ public static class SteamSessionExtensions
 
         if ((long)fileData.TotalSize == fs.Length)
         {
-            var fileSHA1 = SHA1.HashData(fs);
+            var fileSHA1 = await SHA1.HashDataAsync(fs, cancellationToken).ConfigureAwait(false);
             if (fileData.FileHash.SequenceEqual(fileSHA1))
             {
                 return;
@@ -136,7 +136,7 @@ public static class SteamSessionExtensions
     public static async Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, uint appId, DepotManifest depotManifest, CancellationToken cancellationToken = default)
     {
         var depotKey = await steamSession.GetDepotKeyAsync(appId, depotManifest.DepotID);
-        await DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotKey, depotManifest, cancellationToken);
+        await DownloadDepotManifestToDirectoryAsync(steamSession, dir, depotKey, depotManifest, cancellationToken).ConfigureAwait(false);
     }
 
     public static Task DownloadDepotManifestToDirectoryAsync(this SteamSession steamSession, string dir, byte[] depotKey, DepotManifest depotManifest, [StringSyntax(StringSyntaxAttribute.Regex)] string pathSearchRegex, CancellationToken cancellationToken = default)
@@ -199,26 +199,28 @@ public static class SteamSessionExtensions
                 var fullPath = Path.Combine(dir, file.FileName);
                 return DownloadAsync(steamSession, fullPath, file, depotId, depotKey, cancellationToken);
             });
-            await Task.WhenAll(tasks);
-
+            await Task.WhenAll(tasks).ConfigureAwait(false);
         }
 
+        const int _1mb = 1;
+        const int _10mb = 2;
+        const int _max = 2;
         var sizeGroup = files.OrderByDescending(v => v.TotalSize).GroupBy(v => v.TotalSize switch
         {
-            <= 1024 * 1024 => "1mb",
-            <= 10 * 1024 * 1024 => "10mb",
-            _ => "max",
+            <= 1024 * 1024 => _1mb,
+            <= 10 * 1024 * 1024 => _10mb,
+            _ => _max,
         });
-        var sFiles = sizeGroup.FirstOrDefault(v => v.Key is "1mb");
-        var lFiles = sizeGroup.FirstOrDefault(v => v.Key is "10mb");
-        var maxFiles = sizeGroup.FirstOrDefault(v => v.Key is "max");
+        var sFiles = sizeGroup.FirstOrDefault(v => v.Key is _1mb);
+        var lFiles = sizeGroup.FirstOrDefault(v => v.Key is _10mb);
+        var maxFiles = sizeGroup.FirstOrDefault(v => v.Key is _max);
 
         if (maxFiles is { })
-            await ParallelForEachAsync(maxFiles, 1);
+            await ParallelForEachAsync(maxFiles, 1).ConfigureAwait(false);
         if (lFiles is { })
-            await ParallelForEachAsync(lFiles, 3);
+            await ParallelForEachAsync(lFiles, 3).ConfigureAwait(false);
         if (sFiles is { })
-            await ParallelForEachAsync(sFiles, 10);
+            await ParallelForEachAsync(sFiles, 10).ConfigureAwait(false);
 
         return;
 
@@ -258,12 +260,12 @@ public static class SteamSessionExtensions
 
                 if(fs.Length == (long)fileData.TotalSize)
                 {
-                    if (fileData.FileHash.SequenceEqual(SHA1.HashData(fs)))
+                    if (fileData.FileHash.SequenceEqual(await SHA1.HashDataAsync(fs, cancellationToken).ConfigureAwait(false)))
                         return;
                 }
 
                 fs.SetLength((long)fileData.TotalSize);
-                await steamSession.DownloadFileDataToStreamAsync(fs, depotId, depotKey, fileData, cancellationToken);
+                await steamSession.DownloadFileDataToStreamAsync(fs, depotId, depotKey, fileData, cancellationToken).ConfigureAwait(false);
             }
 
         }

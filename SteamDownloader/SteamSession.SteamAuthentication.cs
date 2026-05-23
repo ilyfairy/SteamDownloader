@@ -15,7 +15,7 @@ public partial class SteamSession
         /// <summary>
         /// 是否是登录状态
         /// </summary>
-        public bool Logged => steam.steamUser.SteamID is not null;
+        public bool Logged => steam._steamUser.SteamID is not null;
         public string? AccessToken { get; private set; }
 
         private bool isAnonymous;
@@ -31,11 +31,11 @@ public partial class SteamSession
             //});
             steamSession.CallbackManager.Subscribe<SteamUser.LoggedOnCallback>(v =>
             {
-                steamSession.connectionLoginResult = v.Result;
+                steamSession._connectionLoginResult = v.Result;
             });
             steamSession.CallbackManager.Subscribe<SteamUser.LoggedOffCallback>(v =>
             {
-                steamSession.connectionLoginResult = v.Result;
+                steamSession._connectionLoginResult = v.Result;
             });
 
         }
@@ -52,36 +52,36 @@ public partial class SteamSession
                 await steam.ConnectAsync();
             }
 
-            if (steam.steamUser.SteamID is not null)
+            if (steam._steamUser.SteamID is not null)
                 return;
 
             try
             {
-                steam.loginLock.Wait();
+                steam._loginLock.Wait();
 
-                steam.connectionLoginResult = EResult.Invalid;
+                steam._connectionLoginResult = EResult.Invalid;
                 AccessToken = null;
-                steam.steamUser.LogOnAnonymous();
+                steam._steamUser.LogOnAnonymous();
 
                 //steam.EnsureRunAllCallbacks();
                 steam.CallbackManager.RunWaitCallbacks();
 
-                if (steam.connectionLoginResult is EResult.OK)
+                if (steam._connectionLoginResult is EResult.OK)
                 {
                     isAnonymous = true;
                 }
-                else if (steam.connectionLoginResult is EResult.NoConnection)
+                else if (steam._connectionLoginResult is EResult.NoConnection)
                 {
                     throw new ConnectionException("没有连接, 请先连接");
                 }
                 else
                 {
-                    throw new ConnectionException($"登录失败: {steam.connectionLoginResult}");
+                    throw new ConnectionException($"登录失败: {steam._connectionLoginResult}");
                 }
             }
             finally
             {
-                steam.loginLock.Release();
+                steam._loginLock.Release();
             }
         }
 
@@ -99,12 +99,12 @@ public partial class SteamSession
                 await steam.ConnectAsync();
             }
 
-            if (steam.steamUser.SteamID is not null)
+            if (steam._steamUser.SteamID is not null)
                 return;
 
             try
             {
-                steam.loginLock.Wait();
+                steam._loginLock.Wait();
 
                 var authSession = await steam.SteamClient.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails()
                 {
@@ -116,14 +116,14 @@ public partial class SteamSession
 
                 using var _ = steam.CallbackManager.Subscribe<SteamUser.LoggedOnCallback>(v =>
                 {
-                    steam.connectionLoginResult = v.Result;
+                    steam._connectionLoginResult = v.Result;
                 });
 
                 var result = await authSession.PollingWaitForResultAsync(cancellationToken);
 
                 AccessToken = result.RefreshToken;
                 username = result.AccountName;
-                steam.steamUser.LogOn(new SteamUser.LogOnDetails()
+                steam._steamUser.LogOn(new SteamUser.LogOnDetails()
                 {
                     Username = result.AccountName,
                     Password = null,
@@ -134,18 +134,18 @@ public partial class SteamSession
                 while (true)
                 {
                     steam.CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan);
-                    if (steam.connectionLoginResult is EResult.OK)
+                    if (steam._connectionLoginResult is EResult.OK)
                     {
                         break;
                     }    
-                    if (steam.connectionLoginResult is EResult.NoConnection)
+                    if (steam._connectionLoginResult is EResult.NoConnection)
                         throw new ConnectionException("登录失败");
                     await Task.Delay(100, cancellationToken);
                 }
             }
             finally
             {
-                steam.loginLock.Release();
+                steam._loginLock.Release();
             }
         }
 
@@ -156,21 +156,21 @@ public partial class SteamSession
                 await steam.ConnectAsync().ConfigureAwait(false);
             }
 
-            if (steam.steamUser.SteamID is not null)
+            if (steam._steamUser.SteamID is not null)
                 return;
 
             try
             {
-                await steam.loginLock.WaitAsync();
+                await steam._loginLock.WaitAsync();
 
                 using var loggedOnCallbackDisposable = steam.CallbackManager.Subscribe<SteamUser.LoggedOnCallback>(v =>
                 {
-                    steam.connectionLoginResult = v.Result;
+                    steam._connectionLoginResult = v.Result;
                 });
 
-                steam.connectionLoginResult = EResult.Invalid;
+                steam._connectionLoginResult = EResult.Invalid;
 
-                steam.steamUser.LogOn(new SteamUser.LogOnDetails()
+                steam._steamUser.LogOn(new SteamUser.LogOnDetails()
                 {
                     Username = username,
                     Password = null,
@@ -181,13 +181,13 @@ public partial class SteamSession
                 while (true)
                 {
                     steam.CallbackManager.RunWaitAllCallbacks(Timeout.InfiniteTimeSpan);
-                    if (steam.connectionLoginResult is EResult.OK)
+                    if (steam._connectionLoginResult is EResult.OK)
                     {
                         AccessToken = accessToken;
                         this.username = username;
                         break;
                     }
-                    if (steam.connectionLoginResult is EResult.NoConnection)
+                    if (steam._connectionLoginResult is EResult.NoConnection)
                         throw new ConnectionException("登录失败");
                     await Task.Delay(50).ConfigureAwait(false);
                 }
@@ -195,7 +195,7 @@ public partial class SteamSession
             }
             finally
             {
-                steam.loginLock.Release();
+                steam._loginLock.Release();
             }
         }
 
